@@ -15,10 +15,14 @@ COPY composer.json ./
 RUN composer install --no-interaction --prefer-dist --no-progress --no-dev --optimize-autoloader
 
 COPY . .
+COPY render-start.sh /usr/local/bin/render-start.sh
 COPY docker/apache.conf /etc/apache2/sites-available/000-default.conf
 
 RUN mkdir -p runtime web/assets \
     && chown -R www-data:www-data runtime web/assets \
-    && chmod -R 775 runtime web/assets
+    && chmod -R 775 runtime web/assets \
+    && chmod +x /usr/local/bin/render-start.sh
 
 EXPOSE 80
+
+CMD ["render-start.sh"]
