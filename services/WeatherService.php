@@ -3,12 +3,15 @@
 namespace app\services;
 
 use RuntimeException;
+use Yii;
 use yii\helpers\Json;
 
 class WeatherService
 {
     private const GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search';
     private const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+    private const WTTR_URL = 'https://wttr.in';
+    private const CACHE_TTL_SECONDS = 600;
 
     public function getWeather(string $city): array
     {
@@ -18,6 +21,32 @@ class WeatherService
             throw new RuntimeException('Введите название города.');
         }
 
+        $cached = $this->getFromCache($city);
+        if ($cached !== null) {
+            $cached['cached'] = true;
+            return $cached;
+        }
+
+        try {
+            $data = $this->getWeatherFromOpenMeteo($city);
+        } catch (\Throwable $openMeteoException) {
+            try {
+                $data = $this->getWeatherFromWttr($city);
+                $data['fallback_reason'] = $openMeteoException->getMessage();
+            } catch (\Throwable $wttrException) {
+                throw new RuntimeException(
+                    'Не удалось получить погоду. Open-Meteo: ' . $openMeteoException->getMessage()
+                    . ' Дополнительный API: ' . $wttrException->getMessage()
+                );
+            }
+        }
+
+        $this->saveToCache($city, $data);
+        return $data;
+    }
+
+    private function getWeatherFromOpenMeteo(string $city): array
+    {
         $place = $this->findCity($city);
         $weather = $this->loadWeather((float)$place['latitude'], (float)$place['longitude']);
         $current = $weather['current'] ?? [];
@@ -49,6 +78,57 @@ class WeatherService
                 'weather_description' => $this->weatherCodeToText($weatherCode),
             ],
             'source' => 'Open-Meteo',
+            'cached' => false,
+        ];
+    }
+
+    private function getWeatherFromWttr(string $city): array
+    {
+        $url = self::WTTR_URL . '/' . rawurlencode($city) . '?' . http_build_query([
+            'format' => 'j1',
+            'lang' => 'ru',
+        ]);
+
+        $data = $this->requestJson($url);
+        $current = $data['current_condition'][0] ?? null;
+        $nearest = $data['nearest_area'][0] ?? [];
+
+        if (!is_array($current)) {
+            throw new RuntimeException('дополнительный погодный API вернул пустую текущую погоду.');
+        }
+
+        $weatherDescription = $current['lang_ru'][0]['value']
+            ?? $current['weatherDesc'][0]['value']
+            ?? 'Нет описания';
+
+        $weatherCode = isset($current['weatherCode']) ? (int)$current['weatherCode'] : null;
+
+        return [
+            'query' => $city,
+            'location' => [
+                'name' => $nearest['areaName'][0]['value'] ?? $city,
+                'country' => $nearest['country'][0]['value'] ?? null,
+                'country_code' => null,
+                'admin1' => $nearest['region'][0]['value'] ?? null,
+                'latitude' => $nearest['latitude'] ?? null,
+                'longitude' => $nearest['longitude'] ?? null,
+                'timezone' => null,
+            ],
+            'current' => [
+                'time' => $current['localObsDateTime'] ?? $current['observation_time'] ?? null,
+                'temperature' => isset($current['temp_C']) ? (float)$current['temp_C'] : null,
+                'temperature_unit' => '°C',
+                'apparent_temperature' => isset($current['FeelsLikeC']) ? (float)$current['FeelsLikeC'] : null,
+                'apparent_temperature_unit' => '°C',
+                'humidity' => isset($current['humidity']) ? (int)$current['humidity'] : null,
+                'humidity_unit' => '%',
+                'wind_speed' => isset($current['windspeedKmph']) ? (float)$current['windspeedKmph'] : null,
+                'wind_speed_unit' => 'km/h',
+                'weather_code' => $weatherCode,
+                'weather_description' => $weatherDescription,
+            ],
+            'source' => 'wttr.in fallback',
+            'cached' => false,
         ];
     }
 
@@ -97,9 +177,10 @@ class WeatherService
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_CONNECTTIMEOUT => 10,
                 CURLOPT_TIMEOUT => 20,
-                CURLOPT_USERAGENT => 'Yii2WeatherApi/1.0',
+                CURLOPT_USERAGENT => 'Yii2WeatherApi/1.0 (+https://render.com)',
                 CURLOPT_HTTPHEADER => ['Accept: application/json'],
                 CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                CURLOPT_ENCODING => '',
             ]);
 
             $response = curl_exec($curl);
@@ -111,7 +192,7 @@ class WeatherService
                 'http' => [
                     'method' => 'GET',
                     'timeout' => 20,
-                    'header' => "User-Agent: Yii2WeatherApi/1.0\r\nAccept: application/json\r\n",
+                    'header' => "User-Agent: Yii2WeatherApi/1.0 (+https://render.com)\r\nAccept: application/json\r\n",
                 ],
             ]);
 
@@ -128,7 +209,7 @@ class WeatherService
         }
 
         if ($response === false || $response === null || $response === '') {
-            $message = 'Не удалось получить ответ от погодного API.';
+            $message = 'не удалось получить ответ от внешнего API.';
             if ($error) {
                 $message .= ' Техническая причина: ' . $error;
             }
@@ -136,20 +217,68 @@ class WeatherService
         }
 
         if ($httpCode >= 400) {
-            throw new RuntimeException('Погодный API вернул HTTP ' . $httpCode . '.');
+            if ($httpCode === 429) {
+                throw new RuntimeException('внешний API временно ограничил количество запросов, HTTP 429.');
+            }
+            throw new RuntimeException('внешний API вернул HTTP ' . $httpCode . '.');
         }
 
         try {
             $data = Json::decode($response, true);
         } catch (\Throwable $exception) {
-            throw new RuntimeException('Погодный API вернул некорректный JSON.');
+            throw new RuntimeException('внешний API вернул некорректный JSON.');
         }
 
         if (!is_array($data)) {
-            throw new RuntimeException('Погодный API вернул пустой ответ.');
+            throw new RuntimeException('внешний API вернул пустой ответ.');
         }
 
         return $data;
+    }
+
+    private function getFromCache(string $city): ?array
+    {
+        $file = $this->getCacheFile($city);
+
+        if (!is_file($file)) {
+            return null;
+        }
+
+        if ((time() - filemtime($file)) > self::CACHE_TTL_SECONDS) {
+            @unlink($file);
+            return null;
+        }
+
+        $contents = @file_get_contents($file);
+        if ($contents === false || $contents === '') {
+            return null;
+        }
+
+        try {
+            $data = Json::decode($contents, true);
+        } catch (\Throwable $exception) {
+            return null;
+        }
+
+        return is_array($data) ? $data : null;
+    }
+
+    private function saveToCache(string $city, array $data): void
+    {
+        $file = $this->getCacheFile($city);
+        $dir = dirname($file);
+
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+
+        @file_put_contents($file, Json::encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    private function getCacheFile(string $city): string
+    {
+        $normalized = mb_strtolower(trim($city), 'UTF-8');
+        return Yii::getAlias('@runtime/weather-cache/') . sha1($normalized) . '.json';
     }
 
     private function weatherCodeToText(?int $code): string
