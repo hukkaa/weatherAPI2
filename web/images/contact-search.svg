@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="Поиск">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc371"/>
+      <stop offset="1" stop-color="#ff5f6d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="16" flood-color="#1f5290" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="800" height="500" rx="42" fill="url(#g)"/>
+  <circle cx="130" cy="94" r="70" fill="rgba(255,255,255,0.38)"/>
+  <circle cx="700" cy="80" r="42" fill="rgba(255,255,255,0.24)"/>
+  <circle cx="650" cy="420" r="110" fill="rgba(255,255,255,0.18)"/>
+  <g filter="url(#shadow)"><path d="M230 100l130 44 125-44 95 35v235l-125-44-125 44-100-35z" fill="white"/><path d="M360 144v226M485 100v226" stroke="#bee3ff" stroke-width="12"/></g><circle cx="440" cy="210" r="42" fill="#ff6b6b"/><path d="M440 275s-72-72-72-120a72 72 0 11144 0c0 48-72 120-72 120z" fill="#ff6b6b" opacity="0.9"/>
+  <text x="48" y="438" fill="white" font-family="Arial, sans-serif" font-size="42" font-weight="700">Поиск</text>
+</svg>

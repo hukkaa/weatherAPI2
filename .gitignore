@@ -1,0 +1,10 @@
+/vendor/
+/runtime/*
+!/runtime/.gitkeep
+/web/assets/*
+!/web/assets/.gitkeep
+.env
+*.log
+.DS_Store
+.idea/
+.vscode/
