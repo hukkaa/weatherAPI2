@@ -2,8 +2,8 @@ FROM php:8.3-apache
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       git unzip ca-certificates libpq-dev libicu-dev libzip-dev libonig-dev \
-    && docker-php-ext-install pdo pdo_pgsql intl mbstring zip opcache \
+       git unzip ca-certificates libpq-dev libicu-dev libzip-dev libonig-dev libcurl4-openssl-dev \
+    && docker-php-ext-install pdo pdo_pgsql intl mbstring zip opcache curl \
     && a2enmod rewrite \
     && rm -rf /var/lib/apt/lists/*
 

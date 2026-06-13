@@ -109,3 +109,7 @@ docker compose down
 ```bash
 docker compose down -v
 ```
+
+## Исправление для Render: погодный API
+
+В версии `render-api-fixed` запросы к Open-Meteo выполняются через PHP cURL, а не только через `file_get_contents`. Это надёжнее на Render и показывает техническую причину ошибки, если внешний API недоступен.

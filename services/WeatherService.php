@@ -86,18 +86,57 @@ class WeatherService
 
     private function requestJson(string $url): array
     {
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'timeout' => 10,
-                'header' => "User-Agent: Yii2WeatherApi/1.0\r\nAccept: application/json\r\n",
-            ],
-        ]);
+        $response = null;
+        $httpCode = 0;
+        $error = null;
 
-        $response = @file_get_contents($url, false, $context);
+        if (function_exists('curl_init')) {
+            $curl = curl_init($url);
+            curl_setopt_array($curl, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 20,
+                CURLOPT_USERAGENT => 'Yii2WeatherApi/1.0',
+                CURLOPT_HTTPHEADER => ['Accept: application/json'],
+                CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+            ]);
 
-        if ($response === false) {
-            throw new RuntimeException('Не удалось получить ответ от погодного API. Проверьте интернет в контейнере.');
+            $response = curl_exec($curl);
+            $httpCode = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            $error = curl_error($curl);
+            curl_close($curl);
+        } else {
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 20,
+                    'header' => "User-Agent: Yii2WeatherApi/1.0\r\nAccept: application/json\r\n",
+                ],
+            ]);
+
+            $response = @file_get_contents($url, false, $context);
+            $headers = $http_response_header ?? [];
+            foreach ($headers as $header) {
+                if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $matches)) {
+                    $httpCode = (int)$matches[1];
+                    break;
+                }
+            }
+            $lastError = error_get_last();
+            $error = $lastError['message'] ?? null;
+        }
+
+        if ($response === false || $response === null || $response === '') {
+            $message = 'Не удалось получить ответ от погодного API.';
+            if ($error) {
+                $message .= ' Техническая причина: ' . $error;
+            }
+            throw new RuntimeException($message);
+        }
+
+        if ($httpCode >= 400) {
+            throw new RuntimeException('Погодный API вернул HTTP ' . $httpCode . '.');
         }
 
         try {
